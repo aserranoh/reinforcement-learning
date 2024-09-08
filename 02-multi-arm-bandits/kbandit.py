@@ -2,11 +2,10 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-import matplotlib.pyplot as plt
 import numpy
 import random
-import sys
 from typing import Callable
+from tqdm import tqdm
 
 class Problem(ABC):
 
@@ -58,6 +57,7 @@ class KbanditRun:
     best_actions: list[int] = field(init=False, default_factory=list)
     averages: list[float] = field(init=False)
     actions_count: list[int] = field(init=False)
+    step_size: float | None = None
 
     def __post_init__(self) -> None:
         self.actions_count = [0] * self.k
@@ -65,7 +65,10 @@ class KbanditRun:
 
     def action_taken(self, action: int, reward: float, best_action: float) -> None:
         self.actions_count[action] += 1
-        self.averages[action] = self.averages[action] + 1/self.actions_count[action]*(reward - self.averages[action])
+        step_size = self.step_size
+        if step_size is None:
+            step_size = 1/self.actions_count[action]
+        self.averages[action] = self.averages[action] + step_size*(reward - self.averages[action])
         self.actions.append(action)
         self.rewards.append(reward)
         self.best_actions.append(int(best_action))
@@ -81,9 +84,10 @@ class KbanditRun:
 class Runner:
     steps: int
     epsilon: float = 0.0
+    step_size: float | None = None
     
     def run(self, problem: Problem) -> KbanditRun:
-        result = KbanditRun(len(problem))
+        result = KbanditRun(len(problem), step_size=self.step_size)
 
         for _ in range(self.steps):
             dice = random.random()
@@ -97,10 +101,12 @@ class Runner:
             result.action_taken(int(action), reward, best_action)
         return result
 
-def run_problem(steps: int, n: int, epsilon: float, problem_factory: Callable) -> tuple:
-    print(f"Epsilon: {epsilon}")
+def run_problem(steps: int, n: int, epsilon: float, problem_factory: Callable, step_size: float | None = None) -> tuple:
+    print(f"n: {n}, steps: {steps}, epsilon: {epsilon}")
     problems = [problem_factory() for _ in range(n)]
-    results = [Runner(steps=steps, epsilon=epsilon).run(problem) for problem in problems]
+    results = []
+    for problem, _ in zip(problems, tqdm(range(n))):
+        results.append(Runner(steps=steps, epsilon=epsilon, step_size=step_size).run(problem))
 
     average_reward = numpy.stack([result.average_reward() for result in results])
     average_reward = numpy.average(average_reward, axis=0)
@@ -110,38 +116,3 @@ def run_problem(steps: int, n: int, epsilon: float, problem_factory: Callable) -
     average_best_action = numpy.average(best_action_rates, axis=0)
 
     return average_reward, average_best_action
-
-def plot(rewards: list[numpy.array], best_actions: list[numpy.array], epsilons: list[float]) -> None:
-    plt.figure()
-    plt.subplot(211)
-    for reward, epsilon in zip(rewards, epsilons):
-        plt.plot(reward, label=f"Epsilon = {epsilon}")
-    plt.subplot(212)
-    for best_action, epsilon in zip(best_actions, epsilons):
-        plt.plot(best_action, label=f"Epsilon = {epsilon}")
-    plt.legend()
-    plt.show()
-
-def kbandit_generic(factory: Callable) -> None:
-    rewards, best_actions = [], []
-    epsilons = (0.0, 0.1, 0.01)
-    for epsilon in epsilons:
-        reward, best_action = run_problem(1000, 2000, epsilon, factory)
-        rewards.append(reward)
-        best_actions.append(best_action)
-    plot(rewards, best_actions, epsilons)
-
-def kbandit() -> None:
-    kbandit_generic(lambda: generate_kbandit(10))
-
-def kbandit_ns() -> None:
-    kbandit_generic(lambda: KbanditNonStationary([0.0]*10))
-
-def main() -> None:
-    if sys.argv[1] == "kbandit":
-        kbandit()
-    else:
-        kbandit_ns()
-
-if __name__ == "__main__":
-    main()
